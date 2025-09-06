@@ -1,3 +1,4 @@
+// main.rs
 use env_logger::{Builder, Env}; // Importing the logger builder and environment configuration
 use log::LevelFilter; // Importing log level filter
 use log::{error, warn};
@@ -7,7 +8,7 @@ use tiktoklive::{
     core::live_client::TikTokLiveClient,
     data::live_common::{ClientData, StreamData, TikTokLiveSettings},
     errors::LibError,
-    generated::events::TikTokLiveEvent,
+    core::live_client_events::TikTokLiveEvent,
     TikTokLive,
 };
 use tokio::signal; // Importing signal handling from tokio
@@ -56,13 +57,10 @@ async fn main() {
 
 fn handle_event(client: &TikTokLiveClient, event: &TikTokLiveEvent) {
     match event {
-        TikTokLiveEvent::OnConnected(..) => {
+        TikTokLiveEvent::OnConnected => {
             // This is an EXPERIMENTAL and UNSTABLE feature
-            // Get room info from the client
             let room_info = client.get_room_info();
-            // // Parse the room info
             let client_data: ClientData = serde_json::from_str(room_info).unwrap();
-            // // Parse the stream data
             let stream_data: StreamData = serde_json::from_str(
                 &client_data
                     .data
@@ -73,7 +71,6 @@ fn handle_event(client: &TikTokLiveClient, event: &TikTokLiveEvent) {
                     .stream_data,
             )
             .unwrap();
-            // Get the video URL for the low definition stream with fallback to the high definition stream in a flv format
             let video_url = stream_data
                 .data
                 .ld
@@ -83,32 +80,27 @@ fn handle_event(client: &TikTokLiveClient, event: &TikTokLiveEvent) {
                 .expect("None of the stream types set");
             println!("room info: {}", video_url);
         }
-
-        // Match on the event type
-        TikTokLiveEvent::OnMember(join_event) => {
-            // Handle member join event
-            println!("user: {} joined", join_event.raw_data.user.nickname);
+        TikTokLiveEvent::OnMemberMessage(join_event) => {
+            println!("user: {} joined", join_event.user.as_ref().map(|u| &u.nickname).unwrap_or(&"?".to_string()));
         }
-        TikTokLiveEvent::OnChat(chat_event) => {
-            // Handle chat event
+        TikTokLiveEvent::OnChatMessage(chat_event) => {
             println!(
                 "user: {} -> {}",
-                chat_event.raw_data.user.nickname, chat_event.raw_data.content
+                chat_event.user.as_ref().map(|u| &u.nickname).unwrap_or(&"?".to_string()),
+                &chat_event.comment
             );
         }
-        TikTokLiveEvent::OnGift(gift_event) => {
-            // Handle gift event
-            let nick = &gift_event.raw_data.user.nickname;
-            let gift_name = &gift_event.raw_data.gift.name;
-            let gifts_amount = gift_event.raw_data.gift.combo;
+        TikTokLiveEvent::OnGiftMessage(gift_event) => {
+            let nick = gift_event.user.as_ref().map(|u| u.nickname.clone()).unwrap_or_else(|| "?".to_string());
+            let gift_name = gift_event.gift_details.as_ref().map(|g| g.gift_name.clone()).unwrap_or_else(|| "?".to_string());
+            let gifts_amount = gift_event.combo_count;
             println!(
                 "user: {} sends gift: {} x {}",
                 nick, gift_name, gifts_amount
             );
         }
-        TikTokLiveEvent::OnLike(like_event) => {
-            // Handle like event
-            let nick = &like_event.raw_data.user.nickname;
+        TikTokLiveEvent::OnLikeMessage(like_event) => {
+            let nick = like_event.user.as_ref().map(|u| u.nickname.clone()).unwrap_or_else(|| "?".to_string());
             println!("user: {} likes", nick);
         }
         _ => {} // Ignore other events

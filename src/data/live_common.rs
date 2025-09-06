@@ -1,5 +1,5 @@
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+// live_common.rs
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;

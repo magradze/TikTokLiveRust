@@ -1,40 +1,26 @@
-use crate::core::live_client_builder::TikTokLiveBuilder;
 
-///  # Data structures
-pub mod data;
+// Declare a 'generated' module.
+pub mod generated {
+    // === THIS IS THE FINAL FIX ===
+    // We are now including the exact file that prost-build creates.
+    // The name `tik_tok.rs` is derived from the proto package name with underscores.
+    include!(concat!(env!("OUT_DIR"), "/tik_tok.rs"));
+}
 
-///  # Core functionality of library
+// Declare the other existing modules of the library.
 pub mod core;
-
-///  # Http client and request handling
+pub mod data;
+pub mod errors;
 pub mod http;
 
-///  # ProtocolBuffer structures
-pub mod generated;
+// ...existing code...
 
-// #Errors Library
-pub mod errors;
-
-///
-/// # Entry point of library used to create new instance of TikTokLive client
-///
-/// ```
-/// use tiktoklive::TikTokLive;
-///
-/// let client = TikTokLive::new_client("some-user");
-//         .configure(configure)
-//         .on_event(on_event)
-//         .build();
-///   client.connect().await
-/// ```
-///
+// The main struct for the library's public API.
 pub struct TikTokLive {}
 
 impl TikTokLive {
-    ///
-    /// Returns builder for creating new TikTokLiveClient
-    ///
-    pub fn new_client(user_name: &str) -> TikTokLiveBuilder {
-        TikTokLiveBuilder::new(user_name)
+    /// Returns a builder for creating a new TikTokLiveClient.
+    pub fn new_client(user_name: &str) -> core::live_client_builder::TikTokLiveBuilder {
+        core::live_client_builder::TikTokLiveBuilder::new(user_name)
     }
 }

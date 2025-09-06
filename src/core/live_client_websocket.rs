@@ -1,6 +1,7 @@
+// live_client_websocket.rs
 use futures_util::{SinkExt, StreamExt};
 use log::info;
-use protobuf::Message;
+use prost::Message;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -12,8 +13,9 @@ use crate::core::live_client::TikTokLiveClient;
 use crate::core::live_client_mapper::TikTokLiveMessageMapper;
 use crate::data::live_common::ConnectionState::CONNECTED;
 use crate::errors::LibError;
-use crate::generated::events::{TikTokConnectedEvent, TikTokLiveEvent};
-use crate::generated::messages::webcast::{WebcastPushFrame, WebcastResponse};
+use crate::generated::ProtoMessageFetchResult;
+use crate::generated::WebcastPushFrame;
+use crate::core::live_client_events::TikTokLiveEvent;
 use crate::http::http_data::LiveConnectionDataResponse;
 
 pub struct TikTokLiveWebsocketClient {
@@ -65,7 +67,7 @@ impl TikTokLiveWebsocketClient {
         let write = Arc::new(Mutex::new(write));
 
         client.set_connection_state(CONNECTED);
-        client.publish_event(TikTokLiveEvent::OnConnected(TikTokConnectedEvent {}));
+    client.publish_event(TikTokLiveEvent::OnConnected);
 
         let running = self.running.clone();
         running.store(true, Ordering::SeqCst);
@@ -80,30 +82,30 @@ impl TikTokLiveWebsocketClient {
             while running_clone.load(Ordering::SeqCst) {
                 if let Some(Ok(message)) = read.next().await {
                     if let WsMessage::Binary(buffer) = message {
-                        let mut push_frame = match WebcastPushFrame::parse_from_bytes(&buffer) {
+                        // prost-ის სტრუქტურით დეკოდირება
+                        let push_frame = match WebcastPushFrame::decode(buffer.as_ref()) {
                             Ok(frame) => frame,
                             Err(_) => continue,
                         };
 
-                        let webcast_response = match WebcastResponse::parse_from_bytes(
-                            push_frame.Payload.as_mut_slice(),
-                        ) {
-                            Ok(response) => response,
+                        // payload ველის დეკოდირება როგორც ProtoMessageFetchResult
+                        let proto_result = match ProtoMessageFetchResult::decode(push_frame.payload.as_ref()) {
+                            Ok(result) => result,
                             Err(_) => continue,
                         };
 
-                        if webcast_response.needsAck {
-                            let mut push_frame_ack = WebcastPushFrame::new();
-                            push_frame_ack.PayloadType = "ack".to_string();
-                            push_frame_ack.LogId = push_frame.LogId;
-                            push_frame_ack.Payload =
-                                webcast_response.internalExt.clone().into_bytes();
-
-                            let binary = match push_frame_ack.write_to_bytes() {
-                                Ok(bytes) => bytes,
-                                Err(_) => continue,
+                        if proto_result.needs_ack {
+                            // prost-ის სტრუქტურის ack frame
+                            let push_frame_ack = WebcastPushFrame {
+                                payload_type: "ack".to_string(),
+                                log_id: push_frame.log_id,
+                                payload: proto_result.internal_ext.clone().into_bytes(),
+                                ..Default::default()
                             };
-
+                            let binary = match push_frame_ack.encode_to_vec().as_slice() {
+                                bytes if !bytes.is_empty() => bytes.to_vec(),
+                                _ => continue,
+                            };
                             let message = WsMessage::Binary(binary);
                             if write_clone.lock().await.send(message).await.is_err() {
                                 continue;
@@ -111,7 +113,7 @@ impl TikTokLiveWebsocketClient {
                         }
 
                         message_mapper
-                            .handle_webcast_response(webcast_response, client_clone.as_ref());
+                            .handle_webcast_response(proto_result, client_clone.as_ref());
                     }
                 }
             }
