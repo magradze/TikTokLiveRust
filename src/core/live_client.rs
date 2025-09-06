@@ -1,3 +1,5 @@
+// live_client.rs
+
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -10,7 +12,7 @@ use crate::core::live_client_websocket::TikTokLiveWebsocketClient;
 use crate::data::live_common::ConnectionState::{CONNECTING, DISCONNECTED};
 use crate::data::live_common::{ConnectionState, TikTokLiveInfo, TikTokLiveSettings};
 use crate::errors::LibError;
-use crate::generated::events::TikTokLiveEvent;
+use crate::core::live_client_events::TikTokLiveEvent;
 use crate::http::http_data::LiveStatus::HostOnline;
 use crate::http::http_data::{LiveConnectionDataRequest, LiveDataRequest, LiveUserDataRequest};
 

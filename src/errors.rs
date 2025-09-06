@@ -1,3 +1,4 @@
+// errors.rs
 use std::fmt;
 
 #[derive(Debug)]

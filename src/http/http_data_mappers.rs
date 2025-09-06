@@ -1,3 +1,4 @@
+// http_data_mappers.rs
 use crate::errors::LibError;
 use crate::http::http_data::LiveStatus::{HostNotFound, HostOffline, HostOnline};
 use crate::http::http_data::UserStatus::{Live, LivePaused, NotFound, Offline};
