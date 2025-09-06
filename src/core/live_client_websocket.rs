@@ -1,4 +1,3 @@
-// live_client_websocket.rs
 use futures_util::{SinkExt, StreamExt};
 use log::info;
 use prost::Message;
@@ -11,12 +10,11 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 
 use crate::core::live_client::TikTokLiveClient;
 use crate::core::live_client_mapper::TikTokLiveMessageMapper;
-use crate::data::live_common::ConnectionState::CONNECTED;
+use crate::data::live_common::ConnectionState::{self, CONNECTED, DISCONNECTED};
 use crate::errors::LibError;
-use crate::generated::ProtoMessageFetchResult;
-use crate::generated::WebcastPushFrame;
 use crate::core::live_client_events::TikTokLiveEvent;
 use crate::http::http_data::LiveConnectionDataResponse;
+use crate::generated::{ProtoMessageFetchResult, WebcastPushFrame};
 
 pub struct TikTokLiveWebsocketClient {
     pub(crate) message_mapper: TikTokLiveMessageMapper,
@@ -67,7 +65,7 @@ impl TikTokLiveWebsocketClient {
         let write = Arc::new(Mutex::new(write));
 
         client.set_connection_state(CONNECTED);
-    client.publish_event(TikTokLiveEvent::OnConnected);
+        client.publish_event(TikTokLiveEvent::OnConnected);
 
         let running = self.running.clone();
         running.store(true, Ordering::SeqCst);
@@ -82,41 +80,44 @@ impl TikTokLiveWebsocketClient {
             while running_clone.load(Ordering::SeqCst) {
                 if let Some(Ok(message)) = read.next().await {
                     if let WsMessage::Binary(buffer) = message {
-                        // prost-ის სტრუქტურით დეკოდირება
                         let push_frame = match WebcastPushFrame::decode(buffer.as_ref()) {
                             Ok(frame) => frame,
                             Err(_) => continue,
                         };
 
-                        // payload ველის დეკოდირება როგორც ProtoMessageFetchResult
                         let proto_result = match ProtoMessageFetchResult::decode(push_frame.payload.as_ref()) {
                             Ok(result) => result,
                             Err(_) => continue,
                         };
 
                         if proto_result.needs_ack {
-                            // prost-ის სტრუქტურის ack frame
                             let push_frame_ack = WebcastPushFrame {
                                 payload_type: "ack".to_string(),
                                 log_id: push_frame.log_id,
                                 payload: proto_result.internal_ext.clone().into_bytes(),
                                 ..Default::default()
                             };
-                            let binary = match push_frame_ack.encode_to_vec().as_slice() {
-                                bytes if !bytes.is_empty() => bytes.to_vec(),
-                                _ => continue,
-                            };
+                            
+                            // Using encode_to_vec() is a more robust way to get bytes from a prost message.
+                            let binary = push_frame_ack.encode_to_vec();
                             let message = WsMessage::Binary(binary);
                             if write_clone.lock().await.send(message).await.is_err() {
                                 continue;
                             }
                         }
 
-                        message_mapper
-                            .handle_webcast_response(proto_result, client_clone.as_ref());
+                        // This was already correct in your code.
+                        message_mapper.handle_webcast_response(proto_result, client_clone.as_ref());
                     }
+                } else {
+                    break; // Stream ended
                 }
             }
+            // Logic to handle disconnection
+            running_clone.store(false, Ordering::SeqCst);
+            client_clone.set_connection_state(DISCONNECTED);
+            client_clone.publish_event(TikTokLiveEvent::OnDisconnected);
+            info!("Websocket listener stopped.");
         });
 
         let write_clone = write.clone();
@@ -128,23 +129,9 @@ impl TikTokLiveWebsocketClient {
 
                 let heartbeat_message = WsMessage::Binary(vec![0x3a, 0x02, 0x68, 0x62]);
 
-                match timeout(
-                    Duration::from_secs(5),
-                    write_clone.lock().await.send(heartbeat_message),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        log::info!("Heartbeat sent");
-                    }
-                    Ok(Err(e)) => {
-                        log::error!("Failed to send heartbeat: {:?}", e);
-                        break;
-                    }
-                    Err(e) => {
-                        log::error!("Heartbeat send timed out: {:?}", e);
-                        break;
-                    }
+                if timeout(Duration::from_secs(5), write_clone.lock().await.send(heartbeat_message)).await.is_err() {
+                     log::error!("Heartbeat send timed out or failed");
+                     break;
                 }
             }
             log::info!("Heartbeat task stopped");

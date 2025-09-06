@@ -1,23 +1,18 @@
-// live_client.rs
-
-use std::sync::atomic::AtomicBool;
+// English comments for commits
 use std::sync::Arc;
-
 use log::{error, info, warn};
 
-use crate::core::live_client_events::TikTokLiveEventObserver;
+use crate::core::live_client_events::{TikTokLiveEvent, TikTokLiveEventObserver};
 use crate::core::live_client_http::TikTokLiveHttpClient;
-use crate::core::live_client_mapper::TikTokLiveMessageMapper;
 use crate::core::live_client_websocket::TikTokLiveWebsocketClient;
-use crate::data::live_common::ConnectionState::{CONNECTING, DISCONNECTED};
-use crate::data::live_common::{ConnectionState, TikTokLiveInfo, TikTokLiveSettings};
+use crate::data::live_common::ConnectionState::{self, CONNECTING, DISCONNECTED};
+use crate::data::live_common::{TikTokLiveInfo, TikTokLiveSettings};
 use crate::errors::LibError;
-use crate::core::live_client_events::TikTokLiveEvent;
 use crate::http::http_data::LiveStatus::HostOnline;
 use crate::http::http_data::{LiveConnectionDataRequest, LiveDataRequest, LiveUserDataRequest};
 
 pub struct TikTokLiveClient {
-    settings: TikTokLiveSettings,
+    pub settings: TikTokLiveSettings,
     http_client: TikTokLiveHttpClient,
     event_observer: TikTokLiveEventObserver,
     websocket_client: Arc<TikTokLiveWebsocketClient>,
@@ -42,62 +37,47 @@ impl TikTokLiveClient {
     }
 
     pub async fn connect(mut self) -> Result<(), LibError> {
-        if *(self.room_info.connection_state.lock().unwrap()) != DISCONNECTED {
-            warn!("Client already connected!");
+        if *self.room_info.connection_state.lock().unwrap() != DISCONNECTED {
+            warn!("Client is already connected or connecting.");
             return Ok(());
         }
-
         self.set_connection_state(CONNECTING);
 
-        info!("Getting live user information's");
-        let response = self
-            .http_client
-            .fetch_live_user_data(LiveUserDataRequest {
-                user_name: self.settings.host_name.clone(),
-            })
-            .await?;
+        info!("Fetching room ID for user '{}'...", &self.settings.host_name);
+        let user_data = self.http_client.fetch_live_user_data(LiveUserDataRequest {
+            user_name: self.settings.host_name.clone(),
+        }).await?;
 
-        info!("Getting live room information's");
-        let room_id = response.room_id;
-        let response = self
-            .http_client
-            .fetch_live_data(LiveDataRequest {
-                room_id: room_id.clone(),
-            })
-            .await?;
+        info!("Fetching room info for room ID '{}'...", &user_data.room_id);
+        let room_data = self.http_client.fetch_live_data(LiveDataRequest {
+            room_id: user_data.room_id.clone(),
+        }).await?;
 
-        self.room_info.client_data = response.json;
-        if response.live_status != HostOnline {
-            error!(
-                "Live stream for host is not online!, current status {:?}",
-                response.live_status
-            );
+        self.room_info.client_data = room_data.json;
+        if room_data.live_status != HostOnline {
+            error!("Host '{}' is not online. Status: {:?}", &self.settings.host_name, room_data.live_status);
             self.set_connection_state(DISCONNECTED);
             return Err(LibError::HostNotOnline);
         }
 
-        info!("Getting live connections information's");
-        let response = self
-            .http_client
-            .fetch_live_connection_data(LiveConnectionDataRequest {
-                room_id: room_id.clone(),
-            })
-            .await;
+        info!("Fetching websocket connection details...");
+        let connection_data = self.http_client.fetch_live_connection_data(LiveConnectionDataRequest {
+            room_id: user_data.room_id.clone(),
+        }).await?;
 
+        // The client needs to be heap-allocated to be shared across threads.
         let client_arc = Arc::new(self);
-
-        let ws = TikTokLiveWebsocketClient {
-            message_mapper: TikTokLiveMessageMapper {},
-            running: Arc::new(AtomicBool::new(false)),
-        };
-        let _ = ws.start(response?, client_arc).await;
+        
+        // Start the websocket client. It will manage its own lifecycle in spawned tasks.
+        client_arc.websocket_client.start(connection_data, client_arc.clone()).await?;
 
         Ok(())
     }
 
     pub fn disconnect(&self) {
+        info!("Disconnect requested by user.");
         self.websocket_client.stop();
-        self.set_connection_state(DISCONNECTED)
+        // The connection state will be set to DISCONNECTED by the websocket task itself upon exit.
     }
 
     pub fn publish_event(&self, event: TikTokLiveEvent) {
@@ -111,6 +91,6 @@ impl TikTokLiveClient {
     pub fn set_connection_state(&self, state: ConnectionState) {
         let mut data = self.room_info.connection_state.lock().unwrap();
         *data = state;
-        info!("TikTokLive: {:?}", *data);
+        info!("Connection state changed to: {:?}", *data);
     }
 }

@@ -1,4 +1,6 @@
-// live_client_builder.rs
+// English comments for commits
+// This file is mostly correct and doesn't need many changes.
+// It orchestrates the creation of the client's components.
 use crate::core::live_client::TikTokLiveClient;
 use crate::core::live_client_events::{TikTokEventHandler, TikTokLiveEventObserver};
 use crate::core::live_client_http::TikTokLiveHttpClient;
@@ -14,11 +16,8 @@ pub struct TikTokLiveBuilder {
 }
 
 impl TikTokLiveBuilder {
-    ///
-    ///  # Create new tiktok live builder
-    ///
-    ///  ### user_name - name of tiktok user that can be found in the live link
-    ///
+    /// Creates a new builder for a TikTok LIVE client.
+    /// `user_name`: The TikTok user (`@username`) to connect to.
     pub fn new(user_name: &str) -> Self {
         Self {
             settings: create_default_settings(user_name),
@@ -26,10 +25,7 @@ impl TikTokLiveBuilder {
         }
     }
 
-    ///
-    ///  # Configure live connection settings
-    ///
-    ///
+    /// Allows custom configuration of the client settings.
     pub fn configure<F>(&mut self, on_configure: F) -> &mut Self
     where
         F: FnOnce(&mut TikTokLiveSettings),
@@ -38,23 +34,15 @@ impl TikTokLiveBuilder {
         self
     }
 
-    ///
-    ///  # Invoked every time new event is coming from tiktok
-    ///
-    ///    ## client - instance of TikTokLiveClient
-    ///    ## event  - invoked event
-    ///  ```
-    ///
+    /// Subscribes an event handler to be called for every TikTok LIVE event.
     pub fn on_event(&mut self, on_event: TikTokEventHandler) -> &mut Self {
         self.event_observer.subscribe(on_event);
         self
     }
 
-    ///
-    /// Returns new instance of TikTokLiveClient
-    ///
+    /// Builds the final `TikTokLiveClient` instance.
     pub fn build(&self) -> TikTokLiveClient {
-        let settings = &self.settings;
+        let settings = self.settings.clone();
         let observer = self.event_observer.clone();
         let mapper = TikTokLiveMessageMapper {};
         let websocket_client = TikTokLiveWebsocketClient::new(mapper);
@@ -67,7 +55,7 @@ impl TikTokLiveBuilder {
         };
 
         TikTokLiveClient::new(
-            settings.clone(),
+            settings,
             http_client,
             observer,
             websocket_client,
